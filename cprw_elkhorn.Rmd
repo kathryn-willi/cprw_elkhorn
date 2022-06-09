@@ -1,0 +1,102 @@
+---
+title: "cprw_elkhorn"
+author: "Katie Willi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(googlesheets4)
+```
+
+```{r}
+# from VuLink in the field:
+vulink_on_reader <- function(file) {
+  
+  raw_data <- rvest::read_html(file) %>%
+    rvest::html_node('table') %>%
+    rvest::html_table() %>%
+    slice(-1:-32) %>%
+    janitor::row_to_names(row_number = 1)
+
+}
+```
+
+```{r}
+field_notes <- read_sheet("https://docs.google.com/spreadsheets/d/11Gc1eS1wt9NrU12hWw1mUl25ixKZrTndIVCsvD4UKao/edit#gid=0") %>%
+  filter(site %in% c('elkhorn_upper','elkhorn_lower')) %>%
+  mutate(start_time_mst=(substr(start_time_mst, 12, 19)),
+         DT= round_date(as_datetime(paste0(date,' ',start_time_mst), tz="MST"), '15 mins'))
+
+temp <- tempfile(fileext = ".zip")
+download.file("https://drive.google.com/uc?authuser=0&id=1AiZda_1-2nwrxI8fLD0Y6e5rTg7aocv0&export=download",
+  temp)
+out <- unzip(temp, exdir = tempdir())
+bank <- read.csv(out[14], sep = ";")
+
+
+raw_upper <- map_dfr(grep(list.files("data/html/", full.names = T), pattern = "Upper", invert = F, value = T), vulink_on_reader)
+names(raw_upper) <- make.names(names(raw_upper), unique = T)
+raw_upper <- raw_upper %>%
+  dplyr::select(DT = 1,
+                Water_Temp_C = 18,
+                VuLink_Temp = 2,
+                pH = 15,
+                ORP_mV = 17,
+                Actual_Conductivity_µS_cm = 5,
+                Specific_Conductivity_µS_cm = 6,
+                Salinity_PSU = 7,
+                TDS_ppt = 10,
+                DO_mgl = 12,
+                Perc_O2_Sat = 13,
+                Turbidity_NTU = 11,
+                TDS_ppt = 10) %>%
+  #filter(!grepl("[A-z]", DT)) %>%
+  mutate_at(vars(2:12), as.numeric) %>%
+  mutate(site="elkhorn_upper") %>%
+  mutate(DT = as_datetime(DT, tz = "MST")) %>%
+  mutate(DT = DT - hours(1)) %>%
+  mutate(DT = round_date(DT, '15 mins'))
+
+  
+
+raw_lower <- map_dfr(grep(list.files("data/html/", full.names = T), pattern = "Lower", invert = F, value = T), vulink_on_reader)
+names(raw_lower) <- make.names(names(raw_lower), unique = T)
+raw_lower <- raw_lower %>%
+    select(DT = Date.Time,
+         Water_Temp_C = 18,
+         VuLink_Temp = 2,
+         pH = 11,
+         ORP_mV = 13,
+         Actual_Conductivity_µS_cm = 5,
+         Specific_Conductivity_µS_cm = 6,
+         Salinity_PSU = 7,
+         TDS_ppt = 10,
+         DO_mgl = 14,
+         Perc_O2_Sat = 15,
+         Turbidity_NTU = 17,
+         TDS_ppt = 10) %>%
+  #filter(!grepl("[A-z]", DT)) %>%
+  mutate_at(vars(2:12), as.numeric) %>%
+  mutate(site="elkhorn_lower") %>%
+  mutate(DT = as_datetime(DT, tz = "MST")) %>%
+  mutate(DT = DT - hours(1)) %>%
+  mutate(DT = round_date(DT, '15 mins'))
+
+
+
+both <- rbind(raw_lower,raw_upper) %>%
+  left_join(field_notes, by=c('site','DT'))
+  
+```
+
+```{r}
+ggplot(data=both) +
+  geom_path(aes(x=DT,y=Actual_Conductivity_µS_cm,color=site)) +
+  facet_wrap(~site)
+```
+
+
